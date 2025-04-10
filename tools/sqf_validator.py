@@ -16,6 +16,7 @@ def valid_keyword_after_code(content, index):
 
 def check_sqf(filepath):
     errors = []
+    warnings = []
 
     with open(filepath, "r", encoding = "utf-8", errors = "ignore") as file:
         content = file.read()
@@ -50,6 +51,10 @@ def check_sqf(filepath):
 
         char_index = 0
 
+        # Buffers for TODO detection
+        todo_buffer = ""
+        comment_block_buffer = ""
+
         for c in content:
             if last_is_curly_brace:
                 last_is_curly_brace = False
@@ -59,6 +64,9 @@ def check_sqf(filepath):
 
             # Keep track of current line number
             if c == "\n":
+                if "TODO" in todo_buffer:
+                    warnings.append("  WARNING: TODO comment found on line {}.".format(line_number))
+                todo_buffer = ""
                 line_number += 1
 
             # While we are in a string, we can ignore everything else, except the end of the string
@@ -73,8 +81,13 @@ def check_sqf(filepath):
                 elif check_if_closing:
                     if c == "/":
                         in_comment_block = False
+                        if "TODO" in comment_block_buffer:
+                            warnings.append("  WARNING: TODO comment found on line {}.".format(line_number))
+                        comment_block_buffer = ""
                     elif c != "*":
                         check_if_closing = False
+                else:
+                    comment_block_buffer += c
 
             # If we are not in a comment block, we will check if we are at the start of one or count the () {} and []
             else:
@@ -95,14 +108,16 @@ def check_sqf(filepath):
                         # We are in a line comment, just continue going through the characters until we find an end of line
                         if c == "\n":
                             ignore_till_eol = False
+                        else:
+                            todo_buffer += c
                     else:
                         if c == '"' or c == "'":
                             in_string = True
                             string_type = c
                         elif c == "/":
                             check_if_comment = True
-                        elif c == "\t":
-                            errors.append("  ERROR: Found a tab on line {}.".format(line_number))
+#                        elif c == "\t":
+#                            errors.append("  ERROR: Found a tab on line {}.".format(line_number))
                         elif c in ["(", "[", "{"]:
                             brackets.append(c)
                         elif c == ")":
@@ -140,10 +155,10 @@ def check_sqf(filepath):
             errors.append("  ERROR: Unequal number of curly braces, '{{' = {}, '}}' = {}.".format(brackets.count("{"), brackets.count("}")))
 
         # Ensure includes are before block comments
-        if re.compile('\s*(/\*[\s\S]+?\*/)\s*#include').match(content):
+        if re.compile('\s*(/\*[\s\S]+?\*/)?\s*#include').match(content):
             errors.append("  ERROR: Found an #include after a block comment.")
 
-    return errors
+    return errors, warnings
 
 
 def main():
@@ -167,14 +182,21 @@ def main():
     bad_count = 0
 
     for filepath in sqf_files:
-        errors = check_sqf(filepath)
+        errors, warnings = check_sqf(filepath)
 
-        if errors:
-            print("\nFound {} error(s) in {}:".format(len(errors), os.path.relpath(filepath, root_dir)))
+        if errors or warnings:
+            print("\nFound {} error(s){} in {}:".format(
+                len(errors),
+                " and {} warning(s)".format(len(warnings)) if warnings else "",
+                os.path.relpath(filepath, root_dir)
+            ))
 
             for error in errors:
                 print(error)
+            for warning in warnings:
+                print(warning)
 
+        if errors:
             bad_count += 1
 
     print("\nChecked {} files, found errors in {}.".format(len(sqf_files), bad_count))
